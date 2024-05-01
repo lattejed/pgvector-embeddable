@@ -39,31 +39,62 @@ jobs:
 
       - name: Setup environment
         run: |
-          version=$(echo "${{ github.ref_name }}" | grep '^[0-9]*.[0-9]*.[0-9]*$') || true
+          root_directory="$(pwd)"
+          echo "ROOT_DIRECTORY=$root_directory" | tee -a $GITHUB_ENV
+
+      - name: Setup postgresql environment
+        run: |
+          tag = $(echo "${{ github.ref_name }}" | grep '^[0-9]*.[0-9]*.[0-9]*_[0-9]*.[0-9]*.[0-9]*$') || true
+          version=$(echo "$tag" | awk -F'[._]' '{print $1"."$2"."$3') || true
 
           if [ -z "$version" ]; then
             # Set default version for non-release builds
             version="16.2.0"
           fi
-
+          
           root_directory="$(pwd)"
           archive="postgresql-$version-${{ matrix.target }}"
           install_directory="$root_directory/$archive"
 
-          echo "ARCHIVE=$archive" | tee -a $GITHUB_ENV
-          echo "INSTALL_DIRECTORY=$install_directory" | tee -a $GITHUB_ENV
-          echo "ROOT_DIRECTORY=$root_directory" | tee -a $GITHUB_ENV
-          echo "VERSION=$version" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_VERSION=$version" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_ARCHIVE=$archive" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_INSTALL_DIRECTORY=$install_directory" | tee -a $GITHUB_ENV
+
+      - name: Setup pgvector environment
+        run: |
+          tag = $(echo "${{ github.ref_name }}" | grep '^[0-9]*.[0-9]*.[0-9]*_[0-9]*.[0-9]*.[0-9]*$') || true
+          version=$(echo "$tag" | awk -F'[._]' '{print $4"."$5"."$6') || true
+
+          if [ -z "$version" ]; then
+            # Set default version for non-release builds
+            version="0.7.0"
+          fi
+          
+          root_directory="$(pwd)"
+          archive="pgvector-$version-${{ matrix.target }}"
+          install_directory="$root_directory/$archive"
+
+          echo "PGVECTOR_VERSION=$version" | tee -a $GITHUB_ENV
+          echo "PGVECTOR_ARCHIVE=$archive" | tee -a $GITHUB_ENV
+          echo "PGVECTOR_INSTALL_DIRECTORY=$install_directory" | tee -a $GITHUB_ENV
 
       - name: Checkout postgresql source code (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
         run: |
           source_directory="$ROOT_DIRECTORY/postgresql-src"
-          branch=$(echo "$VERSION" | awk -F. '{print "REL_"$1"_"$2}')
+          branch=$(echo "$POSTGRESQL_VERSION" | awk -F. '{print "REL_"$1"_"$2}')
           git clone --depth 1 --branch $branch -c advice.detachedHead=false https://git.postgresql.org/git/postgresql.git "$source_directory"
-          echo "SOURCE_DIRECTORY=$source_directory" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_SOURCE_DIRECTORY=$source_directory" | tee -a $GITHUB_ENV
 
-      - name: Configure build (MacOS)
+      - name: Checkout pgvector source code (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          source_directory="$ROOT_DIRECTORY/pgvector-src"
+          branch=$(echo "$PGVECTOR_VERSION" | awk -F. '{print "v"$1"."$2"."$3}')
+          git clone --depth 1 --branch $branch -c advice.detachedHead=false https://github.com/pgvector/pgvector.git "$source_directory"
+          echo "PGVECTOR_SOURCE_DIRECTORY=$source_directory" | tee -a $GITHUB_ENV
+
+      - name: Configure postgresql build (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
         run: |
           brew install \
@@ -86,14 +117,14 @@ jobs:
           echo "LDFLAGS=-L${brew_dir}/opt/icu4c/lib" | tee -a $GITHUB_ENV
           echo "LLVM_CONFIG=${brew_dir}/opt/llvm/bin/llvm-config" | tee -a $GITHUB_ENV
 
-      - name: Build (MacOS)
+      - name: Build postgresql (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
         run: |
-          cd "$SOURCE_DIRECTORY"
+          cd "$POSTGRESQL_SOURCE_DIRECTORY"
           major_version=$(echo "$POSTGRESQL_VERSION" | awk -F. '{print $1}')
           
-          ./configure $build_directory \
-            --prefix "$INSTALL_DIRECTORY" \
+          ./configure \
+            --prefix "$POSTGRESQL_INSTALL_DIRECTORY" \
             --enable-integer-datetimes \
             --enable-option-checking=fatal \
             --enable-thread-safety \
@@ -113,14 +144,14 @@ jobs:
           make $([ $major_version -ge 15 ] && echo "install-world-bin" || echo "install")
           make -C contrib install
 
-          cp "$SOURCE_DIRECTORY/COPYRIGHT" "$INSTALL_DIRECTORY"
+          cp "$POSTGRESQL_SOURCE_DIRECTORY/COPYRIGHT" "$POSTGRESQL_INSTALL_DIRECTORY"
           cd "$ROOT_DIRECTORY"
 
       # This allows the MacOS build to be relocated to a different directory
       - name: Update library paths (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
         run: |
-          find $INSTALL_DIRECTORY/bin -type f | xargs -L 1 install_name_tool -change $INSTALL_DIRECTORY/lib/libpq.5.dylib '@executable_path/../lib/libpq.5.dylib'
+          find $POSTGRESQL_INSTALL_DIRECTORY/bin -type f | xargs -L 1 install_name_tool -change $POSTGRESQL_INSTALL_DIRECTORY/lib/libpq.5.dylib '@executable_path/../lib/libpq.5.dylib'
 
       #
       # Package
@@ -128,18 +159,18 @@ jobs:
 
       - name: Prepare archive
         run: |
-          cp $ROOT_DIRECTORY/{README.md,LICENSE} "$INSTALL_DIRECTORY"
-          ls -l "$INSTALL_DIRECTORY/"
+          cp $ROOT_DIRECTORY/{README.md,LICENSE} "$POSTGRESQL_INSTALL_DIRECTORY"
+          ls -l "$POSTGRESQL_INSTALL_DIRECTORY/"
 
       # The .tar.gz archive is the primary archive for all platforms.  This archive
       # provides a consistent experience for programmatic cases (e.g. embedded).
       - name: Build archive (Linux, MacOS)
         if: ${{ !startsWith(matrix.id, 'windows-') }}
         run: |
-          tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
-          shasum -a 256 "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
-          echo "ASSET=$ARCHIVE.tar.gz" | tee -a $GITHUB_ENV
-          echo "ASSET_SUM=$ARCHIVE.tar.gz.sha256" | tee -a $GITHUB_ENV
+          tar czf "$POSTGRESQL_ARCHIVE.tar.gz" "$POSTGRESQL_ARCHIVE"
+          shasum -a 256 "$POSTGRESQL_ARCHIVE.tar.gz" > "$POSTGRESQL_ARCHIVE.tar.gz.sha256"
+          echo "ASSET=$POSTGRESQL_ARCHIVE.tar.gz" | tee -a $GITHUB_ENV
+          echo "ASSET_SUM=$POSTGRESQL_ARCHIVE.tar.gz.sha256" | tee -a $GITHUB_ENV
 
       #
       # Test
@@ -147,7 +178,7 @@ jobs:
 
       - name: Test the binary file cpu architecture
         run: |
-          postgres_file="$INSTALL_DIRECTORY/bin/postgres"
+          postgres_file="$POSTGRESQL_INSTALL_DIRECTORY/bin/postgres"
           
           cpu_architecture=$(file "$postgres_file" | awk '{print $5}')
           
@@ -161,13 +192,13 @@ jobs:
       - name: Test build / archive
         run: |
           test_directory=$(mktemp -d)
-          tar xzf "$ARCHIVE.tar.gz" -C "$test_directory"
-          cd "$test_directory/$ARCHIVE"
+          tar xzf "$POSTGRESQL_ARCHIVE.tar.gz" -C "$test_directory"
+          cd "$test_directory/$POSTGRESQL_ARCHIVE"
           cp "$ROOT_DIRECTORY/scripts/test.sh" .
           
           if [[ "${{ matrix.id }}" = macos* ]]; then
             echo "Testing MacOS"
-            ./test.sh $VERSION
+            ./test.sh $POSTGRESQL_VERSION
           fi
 
       #
@@ -179,4 +210,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "$VERSION" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
+          gh release upload "$POSTGRESQL_VERSION" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
