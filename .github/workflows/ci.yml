@@ -9,24 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  get_versions:
-    name: Get versions
-    uses: ./.github/workflows/get-versions.yml
-
-  # build_postgresql:
-  #   name: Build postgresql
-  #   needs: [get_versions]
-  #   uses: ./.github/workflows/build-postgresql.yml
-  #   with:
-  #     ref: ${{ github.ref }}
-  #     version: ${{ needs.get_versions.outputs.postgres_version }}
-  #     release_version: ${{ needs.get_versions.outputs.release_version }}
-
-  build_postgresql:
-    name: Build pgvector
-    needs: [get_versions]
-    uses: ./.github/workflows/build-pgvector.yml
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
     with:
-      ref: ${{ github.ref }}
-      version: ${{ needs.get_versions.outputs.pgvector_version }}
-      release_version: ${{ needs.get_versions.outputs.release_version }}
+      release: false
+

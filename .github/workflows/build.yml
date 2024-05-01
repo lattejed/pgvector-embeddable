@@ -1,0 +1,181 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        required: true
+
+jobs:
+  build:
+    name: ${{ matrix.id }} (${{ matrix.target }}) (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        id:
+          - macos-arm64
+
+        include:          
+          - id: macos-arm64
+            target: aarch64-apple-darwin
+            os: macos-14
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Get postgres version from tag
+        run: |
+          version=$(echo "${{ github.ref_name }}" | grep '^[0-9]*.[0-9]*.[0-9]*_[0-9]*.[0-9]*.[0-9]*$' | awk -F'[._]' '{print $1"."$2"."$3}') || true
+          if [ -z "$version" ]; then
+            # Set default version for non-release builds
+            version="16.2.0"
+          fi
+          echo "POSTGRESQL_VERSION=$version" | tee -a $GITHUB_ENV
+
+      - name: Get pgvector version from tag
+        run: |
+          version=$(echo "${{ github.ref_name }}" | grep '^[0-9]*.[0-9]*.[0-9]*_[0-9]*.[0-9]*.[0-9]*$' | awk -F'[._]' '{print $4"."$5"."$6}') || true
+          if [ -z "$version" ]; then
+            # Set default version for non-release builds
+            version="0.7.0"
+          fi
+          echo "PGVECTOR_VERSION=$version" | tee -a $GITHUB_ENV
+
+      - name: Get release verison
+        run: |
+          echo "RELEASE_VERSION=${POSTGRESQL_VERSION}_${PGVECTOR_VERSION}" | tee -a $GITHUB_ENV
+
+      - name: Setup environment
+        run: |
+          root_directory="$(pwd)"
+          postgresql_archive="postgresql-${POSTGRESQL_VERSION}-${{ matrix.target }}"
+          pgvector_archive="pgvector-${PGVECTOR_VERSION}-${{ matrix.target }}"
+          postgresql_source_directory="${root_directory}/postgresql-src"
+          postgresql_install_directory="${root_directory}/${postgresql_archive}"
+          pgvector_source_directory="${root_directory}/pgvector-src"
+          pgvector_install_directory="${root_directory}/${pgvector_archive}"
+
+          echo "ROOT_DIRECTORY=$root_directory" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_ARCHIVE=$postgresql_archive" | tee -a $GITHUB_ENV
+          echo "PGVECTOR_ARCHIVE=$pgvector_archive" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_SOURCE_DIRECTORY=$postgresql_source_directory" | tee -a $GITHUB_ENV
+          echo "POSTGRESQL_INSTALL_DIRECTORY=$postgresql_install_directory" | tee -a $GITHUB_ENV
+          echo "PGVECTOR_SOURCE_DIRECTORY=$pgvector_source_directory" | tee -a $GITHUB_ENV
+          echo "PGVECTOR_INSTALL_DIRECTORY=$pgvector_install_directory" | tee -a $GITHUB_ENV
+
+      - name: Checkout source code postgresql (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          branch=$(echo "${POSTGRESQL_VERSION}" | awk -F. '{print "REL_"$1"_"$2}')
+          git clone --depth 1 --branch $branch -c advice.detachedHead=false https://git.postgresql.org/git/postgresql.git "${POSTGRESQL_SOURCE_DIRECTORY}"
+
+      - name: Checkout source code pgvector (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          branch=$(echo "${PGVECTOR_VERSION}" | awk -F. '{print "v"$1"."$2"."$3}')
+          git clone --depth 1 --branch $branch -c advice.detachedHead=false https://github.com/pgvector/pgvector.git "${PGVECTOR_SOURCE_DIRECTORY}"
+
+      - name: Configure build (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          brew install \
+            fop \
+            gettext \
+            icu4c \
+            llvm \
+            lz4 \
+            pkg-config \
+            readline \
+            xz \
+            zstd
+          
+          brew_dir="/usr/local"
+          if [ "${{ matrix.id }}" == "macos-arm64" ]; then
+            brew_dir="/opt/homebrew"
+          fi
+
+          echo "CPPFLAGS=-I${brew_dir}/opt/icu4c/include" | tee -a $GITHUB_ENV
+          echo "LDFLAGS=-L${brew_dir}/opt/icu4c/lib" | tee -a $GITHUB_ENV
+          echo "LLVM_CONFIG=${brew_dir}/opt/llvm/bin/llvm-config" | tee -a $GITHUB_ENV
+
+      - name: Build postgresql (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          cd "${POSTGRESQL_SOURCE_DIRECTORY}"
+          major_version=$(echo "$POSTGRESQL_VERSION" | awk -F. '{print $1}')
+          
+          ./configure \
+            --prefix "${POSTGRESQL_INSTALL_DIRECTORY}" \
+            --enable-integer-datetimes \
+            --enable-option-checking=fatal \
+            --enable-thread-safety \
+            --without-icu \
+            --without-ldap \
+            --with-libxml \
+            --with-libxslt \
+            $([ $major_version -ge 16 ] && echo "--with-llvm") \
+            $([ $major_version -ge 14 ] && echo "--with-lz4") \
+            --with-pgport=5432 \
+            $([ $major_version -ge 15 ] && echo "--with-python") \
+            --with-readline \
+            --with-system-tzdata=/usr/share/zoneinfo \
+            --with-uuid=e2fs \
+            $([ $major_version -ge 16 ] && echo "--with-zstd")
+          make $([ $major_version -ge 15 ] && echo "world-bin")
+          make $([ $major_version -ge 15 ] && echo "install-world-bin" || echo "install")
+          make -C contrib install
+
+          cp "${POSTGRESQL_SOURCE_DIRECTORY}/COPYRIGHT" "${POSTGRESQL_INSTALL_DIRECTORY}"
+          cd "${ROOT_DIRECTORY}"
+
+      - name: Build pgvector (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          cd "${PGVECTOR_SOURCE_DIRECTORY}"
+          
+          PG_CONFIG="${POSTGRESQL_INSTALL_DIRECTORY}/bin/pg_config" make
+
+          cd "${ROOT_DIRECTORY}"
+
+      # This allows the MacOS build to be relocated to a different directory
+      - name: Update library paths (MacOS)
+        if: ${{ startsWith(matrix.id, 'macos-') }}
+        run: |
+          find "${POSTGRESQL_INSTALL_DIRECTORY}/bin" -type f | xargs -L 1 install_name_tool -change "${POSTGRESQL_INSTALL_DIRECTORY}/lib/libpq.5.dylib" '@executable_path/../lib/libpq.5.dylib'
+
+      #
+      # Package
+      #
+
+      # - name: Prepare archive
+      #   run: |
+      #     cp $ROOT_DIRECTORY/{README.md,LICENSE} "$INSTALL_DIRECTORY"
+      #     ls -l "$INSTALL_DIRECTORY/"
+
+      # - name: Build archive (Linux, MacOS)
+      #   if: ${{ !startsWith(matrix.id, 'windows-') }}
+      #   run: |
+      #     tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+      #     shasum -a 256 "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+      #     echo "ASSET=$ARCHIVE.tar.gz" | tee -a $GITHUB_ENV
+      #     echo "ASSET_SUM=$ARCHIVE.tar.gz.sha256" | tee -a $GITHUB_ENV
+
+      #
+      # Release
+      #
+
+      # - name: Upload release archive
+      #   if: ${{ inputs.release == true }}
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     gh release upload "$RELEASE_VERSION" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
