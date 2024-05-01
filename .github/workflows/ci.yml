@@ -13,15 +13,11 @@ jobs:
     name: Get versions
     uses: ./.github/workflows/get-versions.yml
 
-  display_versions:
-    name: Display versions
-    runs-on: ubuntu-latest
+  build_postgresql:
+    name: Build postgresql
     needs: [get_versions]
-    steps:
-      - name: Display versions
-        run: |
-          postgres_version="${{ needs.get_versions.outputs.postgres_version }}"
-          pgvector_version="${{ needs.get_versions.outputs.pgvector_version }}"
-          echo "postgresql version: $postgres_version"
-          echo "pgvector version: $pgvector_version"
-          echo "tag or default: $postgres_version_$pgvector_version"
+    uses: ./.github/workflows/build-postgresql.yml
+    with:
+      ref: ${{ github.ref }}
+      version: ${{ needs.get_versions.outputs.postgres_version }}
+      release_version: ${{ needs.get_versions.outputs.release_version }}
