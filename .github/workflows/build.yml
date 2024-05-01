@@ -143,6 +143,7 @@ jobs:
           cd "${PGVECTOR_SOURCE_DIRECTORY}"
           
           PG_CONFIG="${POSTGRESQL_INSTALL_DIRECTORY}/bin/pg_config" make
+          PG_CONFIG="${POSTGRESQL_INSTALL_DIRECTORY}/bin/pg_config" make install
 
           cd "${ROOT_DIRECTORY}"
 
