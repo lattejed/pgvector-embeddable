@@ -2,11 +2,11 @@ name: get-versions
 
 on:
   workflow_call:
-    inputs:
-      release:
-        description: if this is a release build
-        type: boolean
-        default: false
+    outputs:
+      postgres_version:
+        value: ${{ jobs.get_versions.outputs.postgres_version }}
+      pgvector_version:
+        value: ${{ jobs.get_versions.outputs.pgvector_version }}
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
           fi
 
           echo "PGVECTOR_VERSION=$version" | tee -a $GITHUB_ENV
-
+          
     outputs:
       postgres_version: ${{ env.POSTGRESQL_VERSION }}
       pgvector_version: ${{ env.PGVECTOR_VERSION }}
