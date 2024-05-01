@@ -57,20 +57,16 @@ jobs:
       - name: Setup environment
         run: |
           root_directory="$(pwd)"
-          postgresql_archive="postgresql-${POSTGRESQL_VERSION}-${{ matrix.target }}"
-          pgvector_archive="pgvector-${PGVECTOR_VERSION}-${{ matrix.target }}"
           postgresql_source_directory="${root_directory}/postgresql-src"
-          postgresql_install_directory="${root_directory}/${postgresql_archive}"
           pgvector_source_directory="${root_directory}/pgvector-src"
-          pgvector_install_directory="${root_directory}/${pgvector_archive}"
+          archive="postgresql-${RELEASE_VERSION}-${{ matrix.target }}"
+          install_directory="${root_directory}/${archive}"
 
           echo "ROOT_DIRECTORY=$root_directory" | tee -a $GITHUB_ENV
-          echo "POSTGRESQL_ARCHIVE=$postgresql_archive" | tee -a $GITHUB_ENV
-          echo "PGVECTOR_ARCHIVE=$pgvector_archive" | tee -a $GITHUB_ENV
           echo "POSTGRESQL_SOURCE_DIRECTORY=$postgresql_source_directory" | tee -a $GITHUB_ENV
-          echo "POSTGRESQL_INSTALL_DIRECTORY=$postgresql_install_directory" | tee -a $GITHUB_ENV
           echo "PGVECTOR_SOURCE_DIRECTORY=$pgvector_source_directory" | tee -a $GITHUB_ENV
-          echo "PGVECTOR_INSTALL_DIRECTORY=$pgvector_install_directory" | tee -a $GITHUB_ENV
+          echo "ARCHIVE=$archive" | tee -a $GITHUB_ENV
+          echo "INSTALL_DIRECTORY=$install_directory" | tee -a $GITHUB_ENV
 
       - name: Checkout source code postgresql (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
@@ -114,7 +110,7 @@ jobs:
           major_version=$(echo "$POSTGRESQL_VERSION" | awk -F. '{print $1}')
           
           ./configure \
-            --prefix "${POSTGRESQL_INSTALL_DIRECTORY}" \
+            --prefix "${INSTALL_DIRECTORY}" \
             --enable-integer-datetimes \
             --enable-option-checking=fatal \
             --enable-thread-safety \
@@ -134,7 +130,7 @@ jobs:
           make $([ $major_version -ge 15 ] && echo "install-world-bin" || echo "install")
           make -C contrib install
 
-          cp "${POSTGRESQL_SOURCE_DIRECTORY}/COPYRIGHT" "${POSTGRESQL_INSTALL_DIRECTORY}"
+          cp "${POSTGRESQL_SOURCE_DIRECTORY}/COPYRIGHT" "${INSTALL_DIRECTORY}"
           cd "${ROOT_DIRECTORY}"
 
       - name: Build pgvector (MacOS)
@@ -142,8 +138,8 @@ jobs:
         run: |
           cd "${PGVECTOR_SOURCE_DIRECTORY}"
           
-          PG_CONFIG="${POSTGRESQL_INSTALL_DIRECTORY}/bin/pg_config" make
-          PG_CONFIG="${POSTGRESQL_INSTALL_DIRECTORY}/bin/pg_config" make install
+          PG_CONFIG="${INSTALL_DIRECTORY}/bin/pg_config" make
+          PG_CONFIG="${INSTALL_DIRECTORY}/bin/pg_config" make install
 
           cd "${ROOT_DIRECTORY}"
 
@@ -151,32 +147,32 @@ jobs:
       - name: Update library paths (MacOS)
         if: ${{ startsWith(matrix.id, 'macos-') }}
         run: |
-          find "${POSTGRESQL_INSTALL_DIRECTORY}/bin" -type f | xargs -L 1 install_name_tool -change "${POSTGRESQL_INSTALL_DIRECTORY}/lib/libpq.5.dylib" '@executable_path/../lib/libpq.5.dylib'
+          find "${INSTALL_DIRECTORY}/bin" -type f | xargs -L 1 install_name_tool -change "${INSTALL_DIRECTORY}/lib/libpq.5.dylib" '@executable_path/../lib/libpq.5.dylib'
 
       #
       # Package
       #
 
-      # - name: Prepare archive
-      #   run: |
-      #     cp $ROOT_DIRECTORY/{README.md,LICENSE} "$INSTALL_DIRECTORY"
-      #     ls -l "$INSTALL_DIRECTORY/"
+      - name: Prepare archive
+        run: |
+          cp $ROOT_DIRECTORY/{README.md,LICENSE} "$INSTALL_DIRECTORY"
+          ls -l "$INSTALL_DIRECTORY/"
 
-      # - name: Build archive (Linux, MacOS)
-      #   if: ${{ !startsWith(matrix.id, 'windows-') }}
-      #   run: |
-      #     tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
-      #     shasum -a 256 "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
-      #     echo "ASSET=$ARCHIVE.tar.gz" | tee -a $GITHUB_ENV
-      #     echo "ASSET_SUM=$ARCHIVE.tar.gz.sha256" | tee -a $GITHUB_ENV
+      - name: Build archive (Linux, MacOS)
+        if: ${{ !startsWith(matrix.id, 'windows-') }}
+        run: |
+          tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          shasum -a 256 "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+          echo "ASSET=$ARCHIVE.tar.gz" | tee -a $GITHUB_ENV
+          echo "ASSET_SUM=$ARCHIVE.tar.gz.sha256" | tee -a $GITHUB_ENV
 
       #
       # Release
       #
 
-      # - name: Upload release archive
-      #   if: ${{ inputs.release == true }}
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   run: |
-      #     gh release upload "$RELEASE_VERSION" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
+      - name: Upload release archive
+        if: ${{ inputs.release == true }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$RELEASE_VERSION" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
