@@ -19,5 +19,8 @@ jobs:
     steps:
       - name: Display versions
         run: |
-          echo "PostgreSQL version: ${{ needs.get_versions.outputs.postgres_version }}"
-          echo "pgvector version: ${{ needs.get_versions.outputs.pgvector_version }}"
+          postgres_version="${{ needs.get_versions.outputs.postgres_version }}"
+          pgvector_version="${{ needs.get_versions.outputs.pgvector_version }}"
+          echo "postgresql version: $postgres_version"
+          echo "pgvector version: $pgvector_version"
+          echo "tag or default: $postgres_version_$pgvector_version"
