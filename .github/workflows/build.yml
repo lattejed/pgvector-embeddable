@@ -59,7 +59,7 @@ jobs:
           root_directory="$(pwd)"
           postgresql_source_directory="${root_directory}/postgresql-src"
           pgvector_source_directory="${root_directory}/pgvector-src"
-          archive="postgresql-${RELEASE_VERSION}-${{ matrix.target }}"
+          archive="postgresql-${POSTGRESQL_VERSION}-${{ matrix.target }}"
           install_directory="${root_directory}/${archive}"
 
           echo "ROOT_DIRECTORY=$root_directory" | tee -a $GITHUB_ENV
