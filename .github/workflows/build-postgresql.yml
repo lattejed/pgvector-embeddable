@@ -79,7 +79,7 @@ jobs:
           
           brew_dir="/usr/local"
           if [ "${{ matrix.id }}" == "macos-arm64" ]; then
-            brew_dir="$HOME/brew"
+            brew_dir="/opt/homebrew"
           fi
 
           echo "CPPFLAGS=-I${brew_dir}/opt/icu4c/include" | tee -a $GITHUB_ENV
